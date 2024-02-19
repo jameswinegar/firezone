@@ -1,28 +1,26 @@
 //! Main connlib library for clients.
 pub use connlib_shared::messages::ResourceDescription;
 pub use connlib_shared::{Callbacks, Error};
+pub use phoenix_channel::SecureUrl;
 pub use tracing_appender::non_blocking::WorkerGuard;
 
-use backoff::{backoff::Backoff, ExponentialBackoffBuilder};
-use connlib_shared::control::SecureUrl;
-use connlib_shared::{control::PhoenixChannel, login_url, CallbackErrorFacade, Mode, Result};
-use control::ControlPlane;
+use backoff::ExponentialBackoffBuilder;
+use connlib_shared::{get_user_agent, login_url, CallbackErrorFacade, Mode, Result};
 use firezone_tunnel::Tunnel;
-use messages::IngressMessages;
-use messages::Messages;
-use messages::ReplyMessages;
+use phoenix_channel::PhoenixChannel;
 use secrecy::{Secret, SecretString};
-use std::future::poll_fn;
 use std::time::Duration;
-use tokio::time::{Interval, MissedTickBehavior};
-use tokio::{runtime::Runtime, time::Instant};
 use url::Url;
 
-mod control;
+mod eventloop;
 pub mod file_logger;
 mod messages;
 
+const PHOENIX_TOPIC: &str = "client";
+
 struct StopRuntime;
+
+pub use eventloop::Eventloop;
 
 /// Max interval to retry connections to the portal if it's down or the client has network
 /// connectivity changes. Set this to something short so that the end-user experiences
@@ -35,18 +33,6 @@ const MAX_RECONNECT_INTERVAL: Duration = Duration::from_secs(5);
 pub struct Session<CB: Callbacks> {
     runtime_stopper: tokio::sync::mpsc::Sender<StopRuntime>,
     callbacks: CallbackErrorFacade<CB>,
-}
-
-macro_rules! fatal_error {
-    ($result:expr, $rt:expr, $cb:expr) => {
-        match $result {
-            Ok(res) => res,
-            Err(err) => {
-                Self::disconnect_inner($rt, $cb, Some(err));
-                return;
-            }
-        }
-    };
 }
 
 impl<CB> Session<CB>
@@ -75,6 +61,14 @@ where
         callbacks: CB,
         max_partition_time: Option<Duration>,
     ) -> Result<Self> {
+        let (portal_url, private_key) = login_url(
+            Mode::Client,
+            api_url.try_into().map_err(|_| Error::UriError)?,
+            token,
+            device_id,
+            device_name_override,
+        )?;
+
         // TODO: We could use tokio::runtime::current() to get the current runtime
         // which could work with swift-rust that already runs a runtime. But IDK if that will work
         // in all platforms, a couple of new threads shouldn't bother none.
@@ -92,6 +86,7 @@ where
             .enable_all()
             .build()?;
         {
+            let callbacks = callbacks.clone();
             let callbacks = callbacks.clone();
             let default_panic_hook = std::panic::take_hook();
             std::panic::set_hook(Box::new({
@@ -111,17 +106,29 @@ where
             }));
         }
 
-        Self::connect_inner(
-            &runtime,
-            tx.clone(),
-            api_url.try_into().map_err(|_| Error::UriError)?,
-            token,
-            device_id,
-            device_name_override,
-            os_version_override,
-            callbacks.clone(),
-            max_partition_time,
-        );
+        // TODO: Log errors
+        runtime.spawn({
+            let callbacks = callbacks.clone();
+
+            async move {
+                let tunnel = Tunnel::new(private_key, callbacks)?;
+                let portal = PhoenixChannel::connect(
+                    Secret::new(SecureUrl::from_url(portal_url)),
+                    get_user_agent(os_version_override),
+                    PHOENIX_TOPIC,
+                    (),
+                    ExponentialBackoffBuilder::default()
+                        .with_max_elapsed_time(max_partition_time)
+                        .with_max_interval(MAX_RECONNECT_INTERVAL)
+                        .build(),
+                );
+
+                let mut eventloop = Eventloop::new(tunnel, portal);
+
+                std::future::poll_fn(|cx| eventloop.poll(cx)).await
+            }
+        });
+
         std::thread::spawn(move || {
             rx.blocking_recv();
             runtime.shutdown_background();
@@ -131,113 +138,6 @@ where
             runtime_stopper: tx,
             callbacks,
         })
-    }
-
-    // TODO: Refactor this when we refactor PhoenixChannel.
-    // See https://github.com/firezone/firezone/issues/2158
-    #[allow(clippy::too_many_arguments)]
-    fn connect_inner(
-        runtime: &Runtime,
-        runtime_stopper: tokio::sync::mpsc::Sender<StopRuntime>,
-        api_url: Url,
-        token: SecretString,
-        device_id: String,
-        device_name_override: Option<String>,
-        os_version_override: Option<String>,
-        callbacks: CallbackErrorFacade<CB>,
-        max_partition_time: Option<Duration>,
-    ) {
-        runtime.spawn(async move {
-            let (connect_url, private_key) = fatal_error!(
-                login_url(Mode::Client, api_url, token, device_id, device_name_override),
-                runtime_stopper,
-                &callbacks
-            );
-
-            // This is kinda hacky, the buffer size is 1 so that we make sure that we
-            // process one message at a time, blocking if a previous message haven't been processed
-            // to force queue ordering.
-            let (control_plane_sender, mut control_plane_receiver) = tokio::sync::mpsc::channel(1);
-
-            let mut connection = PhoenixChannel::<_, IngressMessages, ReplyMessages, Messages>::new(Secret::new(SecureUrl::from_url(connect_url)), os_version_override, move |msg, reference, topic| {
-                let control_plane_sender = control_plane_sender.clone();
-                async move {
-                    tracing::trace!(?msg);
-                    if let Err(e) = control_plane_sender.send((msg, reference, topic)).await {
-                        tracing::warn!("Received a message after handler already closed: {e}. Probably message received during session clean up.");
-                    }
-                }
-            });
-
-            let tunnel = fatal_error!(
-                Tunnel::new(private_key, callbacks.clone()),
-                runtime_stopper,
-                &callbacks
-            );
-
-            let mut control_plane = ControlPlane {
-                tunnel,
-                phoenix_channel: connection.sender_with_topic("client".to_owned()),
-                tunnel_init: false,
-                next_request_id: 0,
-                sent_connection_intents: Default::default(),
-            };
-
-            tokio::spawn({
-                let runtime_stopper = runtime_stopper.clone();
-                let callbacks = callbacks.clone();
-                async move {
-                let mut upload_logs_interval = upload_interval();
-                loop {
-                    tokio::select! {
-                        Some((msg, reference, topic)) = control_plane_receiver.recv() => {
-                            match msg {
-                                Ok(msg) => control_plane.handle_message(msg, reference)?,
-                                Err(err) => {
-                                    if let Err(e) = control_plane.handle_error(err, reference, topic).await {
-                                        Self::disconnect_inner(runtime_stopper, &callbacks, Some(e));
-                                        break;
-                                    }
-                                },
-                            }
-                        },
-                        event = poll_fn(|cx| control_plane.tunnel.poll_next_event(cx)) => control_plane.handle_tunnel_event(event).await,
-                        _ = upload_logs_interval.tick() => control_plane.request_log_upload_url().await,
-                        else => break
-                    }
-                }
-
-                Result::Ok(())
-            }});
-
-            tokio::spawn(async move {
-                let mut exponential_backoff = ExponentialBackoffBuilder::default().with_max_elapsed_time(max_partition_time).with_max_interval(MAX_RECONNECT_INTERVAL).build();
-                loop {
-                    // `connection.start` calls the callback only after connecting
-                    tracing::debug!("Attempting connection to portal...");
-                    let result = connection.start(vec!["client".to_owned()], || exponential_backoff.reset()).await;
-                    tracing::warn!("Disconnected from the portal");
-                    if let Err(e) = &result {
-                        if e.is_http_client_error() {
-                            tracing::error!(error = ?e, "Connection to portal failed. Is your token valid?");
-                            fatal_error!(result, runtime_stopper, &callbacks);
-                        } else {
-                            tracing::error!(error = ?e, "Connection to portal failed. Starting retries with backoff timer.");
-                        }
-                    }
-                    if let Some(t) = exponential_backoff.next_backoff() {
-                        tracing::debug!("Connection to portal failed. Retrying connection to portal in {:?}", t);
-                        tokio::time::sleep(t).await;
-                    } else {
-                        tracing::error!("Connection to portal failed, giving up!");
-                        Self::disconnect_inner(runtime_stopper, &callbacks, None);
-                        break;
-                    }
-                }
-
-            });
-
-        });
     }
 
     fn disconnect_inner(
@@ -278,40 +178,4 @@ where
             tracing::error!("Couldn't stop runtime: {err}");
         }
     }
-}
-
-fn upload_interval() -> Interval {
-    let duration = upload_interval_duration_from_env_or_default();
-    let mut interval = tokio::time::interval_at(Instant::now() + duration, duration);
-    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-    interval
-}
-
-/// Parses an interval from the _compile-time_ env variable `CONNLIB_LOG_UPLOAD_INTERVAL_SECS`.
-///
-/// If not present or parsing as u64 fails, we fall back to a default interval of 5 minutes.
-fn upload_interval_duration_from_env_or_default() -> Duration {
-    const DEFAULT: Duration = Duration::from_secs(60 * 5);
-
-    let Some(interval) = option_env!("CONNLIB_LOG_UPLOAD_INTERVAL_SECS") else {
-        tracing::warn!(interval = ?DEFAULT, "Env variable `CONNLIB_LOG_UPLOAD_INTERVAL_SECS` was not set during compile-time, falling back to default");
-
-        return DEFAULT;
-    };
-
-    let interval = match interval.parse() {
-        Ok(i) => i,
-        Err(e) => {
-            tracing::warn!(interval = ?DEFAULT, "Failed to parse `CONNLIB_LOG_UPLOAD_INTERVAL_SECS` as u64: {e}");
-            return DEFAULT;
-        }
-    };
-
-    tracing::info!(
-        ?interval,
-        "Using upload interval specified at compile-time via `CONNLIB_LOG_UPLOAD_INTERVAL_SECS`"
-    );
-
-    Duration::from_secs(interval)
 }

@@ -1116,6 +1116,7 @@ dependencies = [
  "firezone-tunnel",
  "ip_network",
  "parking_lot",
+ "phoenix-channel",
  "reqwest",
  "secrecy",
  "serde",

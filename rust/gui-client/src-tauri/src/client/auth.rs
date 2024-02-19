@@ -1,7 +1,7 @@
 //! Fulfills <https://github.com/firezone/firezone/issues/2823>
 
 use crate::client::known_dirs;
-use connlib_shared::control::SecureUrl;
+use connlib_client_shared::SecureUrl;
 use rand::{thread_rng, RngCore};
 use secrecy::{ExposeSecret, Secret, SecretString};
 use std::path::PathBuf;

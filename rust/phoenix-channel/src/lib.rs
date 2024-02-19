@@ -127,12 +127,13 @@ pub enum Error {
     CloseMessage,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+/// A strict-monotonically increasing ID for outbound requests.
+#[derive(Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct OutboundRequestId(u64);
 
 impl OutboundRequestId {
-    #[cfg(test)]
-    pub(crate) fn new(id: u64) -> Self {
+    // Should only be used for unit-testing.
+    pub fn for_test(id: u64) -> Self {
         Self(id)
     }
 }
@@ -154,7 +155,7 @@ impl fmt::Display for InboundRequestId {
 
 #[derive(Clone)]
 pub struct SecureUrl {
-    inner: Url,
+    pub inner: Url,
 }
 
 impl SecureUrl {
@@ -351,7 +352,7 @@ where
                                 req_id: OutboundRequestId(
                                     message.reference.ok_or(Error::MissingReplyId)?,
                                 ),
-                                reason,
+                                res: reason,
                             }));
                         }
                         Payload::Reply(Reply::Ok(OkReply::Message(reply))) => {
@@ -389,13 +390,12 @@ where
                             continue;
                         }
                         Payload::Error(Empty {}) => {
-                            return Poll::Ready(Ok(Event::ErrorResponse {
-                                topic: message.topic,
-                                req_id: OutboundRequestId(
-                                    message.reference.ok_or(Error::MissingReplyId)?,
-                                ),
-                                reason: ErrorReply::Other,
-                            }))
+                            tracing::warn!(
+                                "Received empty error for request {:?}",
+                                message.reference
+                            );
+
+                            continue;
                         }
                         Payload::Close(Empty {}) => {
                             self.reconnect_on_transient_error(Error::CloseMessage);
@@ -459,8 +459,12 @@ where
         let request_id = self.fetch_add_request_id();
 
         // We don't care about the reply type when serializing
-        let msg = serde_json::to_string(&PhoenixMessage::<_, ()>::new(topic, payload, request_id))
-            .expect("we should always be able to serialize a join topic message");
+        let msg = serde_json::to_string(&PhoenixMessage::<_, ()>::new_message(
+            topic,
+            payload,
+            Some(request_id),
+        ))
+        .expect("we should always be able to serialize a join topic message");
 
         self.pending_messages.push_back(msg);
 
@@ -502,21 +506,21 @@ pub enum Event<TInboundMsg, TOutboundRes> {
         /// The response received for an outbound request.
         res: TOutboundRes,
     },
+    ErrorResponse {
+        topic: String,
+        req_id: OutboundRequestId,
+        res: ErrorReply,
+    },
     JoinedRoom {
         topic: String,
     },
     HeartbeatSent,
-    ErrorResponse {
-        topic: String,
-        req_id: OutboundRequestId,
-        reason: ErrorReply,
-    },
     /// The server sent us a message, most likely this is a broadcast to all connected clients.
     InboundMessage {
         topic: String,
         msg: TInboundMsg,
     },
-    Disconnect(String),
+    Disconnect(DisconnectReason),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize)]
@@ -539,9 +543,26 @@ enum Payload<T, R> {
     #[serde(rename = "phx_close")]
     Close(Empty),
     #[serde(rename = "disconnect")]
-    Disconnect { reason: String },
+    Disconnect { reason: DisconnectReason },
     #[serde(untagged)]
     Message(T),
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DisconnectReason {
+    TokenExpired,
+    #[serde(other)]
+    Other,
+}
+
+impl fmt::Display for DisconnectReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TokenExpired => write!(f, "token expired"),
+            Self::Other => write!(f, "other"),
+        }
+    }
 }
 
 // Awful hack to get serde_json to generate an empty "{}" instead of using "null"
@@ -563,13 +584,13 @@ enum OkReply<T> {
     NoMessage(Empty),
 }
 
+// TODO: I think this should also be a type-parameter.
 /// This represents the info we have about the error
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorReply {
     #[serde(rename = "unmatched topic")]
     UnmatchedTopic,
-    TokenExpired,
     NotFound,
     Offline,
     Disabled,
@@ -578,11 +599,28 @@ pub enum ErrorReply {
 }
 
 impl<T, R> PhoenixMessage<T, R> {
-    pub fn new(topic: impl Into<String>, payload: T, reference: u64) -> Self {
+    pub fn new_message(topic: impl Into<String>, payload: T, reference: Option<u64>) -> Self {
         Self {
             topic: topic.into(),
             payload: Payload::Message(payload),
-            reference: Some(reference),
+            reference,
+        }
+    }
+
+    pub fn new_ok_reply(topic: impl Into<String>, payload: R, reference: Option<u64>) -> Self {
+        Self {
+            topic: topic.into(),
+            payload: Payload::Reply(Reply::Ok(OkReply::Message(payload))),
+            reference,
+        }
+    }
+
+    #[cfg(test)]
+    fn new_err_reply(topic: impl Into<String>, reason: ErrorReply, reference: Option<u64>) -> Self {
+        Self {
+            topic: topic.into(),
+            payload: Payload::Reply(Reply::Error { reason }),
+            reference,
         }
     }
 }
@@ -727,7 +765,24 @@ mod tests {
         "#;
         let actual_reply: Payload<(), ()> = serde_json::from_str(actual_reply).unwrap();
         let expected_reply = Payload::<(), ()>::Disconnect {
-            reason: "token_expired".to_string(),
+            reason: DisconnectReason::TokenExpired,
+        };
+        assert_eq!(actual_reply, expected_reply);
+    }
+
+    #[test]
+    fn unknown_disconnect_reason() {
+        let actual_reply = r#"
+        {
+          "event": "disconnect",
+          "ref": null,
+          "topic": "client",
+          "payload": { "reason": "foo bar" }
+        }
+        "#;
+        let actual_reply: Payload<(), ()> = serde_json::from_str(actual_reply).unwrap();
+        let expected_reply = Payload::<(), ()>::Disconnect {
+            reason: DisconnectReason::Other,
         };
         assert_eq!(actual_reply, expected_reply);
     }
@@ -774,5 +829,15 @@ mod tests {
             reason: ErrorReply::Other,
         });
         assert_eq!(actual_reply, expected_reply);
+    }
+
+    #[test]
+    fn disabled_err_reply() {
+        let json = r#"{"event":"phx_reply","ref":null,"topic":"client","payload":{"status":"error","response":{"reason": "disabled"}}}"#;
+
+        let actual = serde_json::from_str::<PhoenixMessage<(), ()>>(json).unwrap();
+        let expected = PhoenixMessage::new_err_reply("client", ErrorReply::Disabled, None);
+
+        assert_eq!(actual, expected)
     }
 }

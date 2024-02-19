@@ -1,7 +1,7 @@
 //! A module for registering, catching, and parsing deep links that are sent over to the app's already-running instance
 
 use crate::client::auth::Response as AuthResponse;
-use connlib_shared::control::SecureUrl;
+use connlib_client_shared::SecureUrl;
 use secrecy::{ExposeSecret, Secret, SecretString};
 use std::io;
 
@@ -104,8 +104,8 @@ pub(crate) fn parse_auth_callback(url: &Secret<SecureUrl>) -> Option<AuthRespons
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use anyhow::Result;
-    use connlib_shared::control::SecureUrl;
     use secrecy::{ExposeSecret, Secret};
 
     #[test]
