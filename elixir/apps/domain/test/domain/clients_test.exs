@@ -724,7 +724,7 @@ defmodule Domain.ClientsTest do
       assert deleted.deleted_at
     end
 
-    test "admin can not delete clients in other accounts", %{
+    test "admin cannot delete clients in other accounts", %{
       admin_subject: subject
     } do
       client = Fixtures.Clients.create_client()
@@ -743,7 +743,7 @@ defmodule Domain.ClientsTest do
       assert deleted.deleted_at
     end
 
-    test "unprivileged can not delete other people clients", %{
+    test "unprivileged cannot delete other people clients", %{
       account: account,
       unprivileged_subject: subject
     } do

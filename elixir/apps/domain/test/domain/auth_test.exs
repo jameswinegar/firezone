@@ -71,7 +71,7 @@ defmodule Domain.AuthTest do
       assert fetched_provider.id == provider.id
     end
 
-    test "returns error when subject can not view providers", %{
+    test "returns error when subject cannot view providers", %{
       subject: subject
     } do
       subject = Fixtures.Auth.remove_permissions(subject)
@@ -200,7 +200,7 @@ defmodule Domain.AuthTest do
       assert fetch_active_provider_by_adapter(:userpass, subject) == {:error, :not_found}
     end
 
-    test "returns error when subject can not view providers", %{
+    test "returns error when subject cannot view providers", %{
       subject: subject
     } do
       subject = Fixtures.Auth.remove_permissions(subject)
@@ -250,7 +250,7 @@ defmodule Domain.AuthTest do
       assert provider.account_id == subject.account.id
     end
 
-    test "returns error when subject can not manage providers" do
+    test "returns error when subject cannot manage providers" do
       account = Fixtures.Accounts.create_account()
 
       identity =
@@ -668,7 +668,7 @@ defmodule Domain.AuthTest do
       }
     end
 
-    test "returns error when subject can not create providers", %{
+    test "returns error when subject cannot create providers", %{
       account: account
     } do
       subject =
@@ -812,7 +812,7 @@ defmodule Domain.AuthTest do
       assert is_nil(provider.deleted_at)
     end
 
-    test "returns error when subject can not manage providers", %{
+    test "returns error when subject cannot manage providers", %{
       provider: provider,
       subject: subject
     } do
@@ -965,7 +965,7 @@ defmodule Domain.AuthTest do
       assert disable_provider(provider, subject) == {:error, :not_found}
     end
 
-    test "returns error when subject can not disable providers", %{
+    test "returns error when subject cannot disable providers", %{
       subject: subject,
       provider: provider
     } do
@@ -1027,7 +1027,7 @@ defmodule Domain.AuthTest do
       assert enable_provider(provider, subject) == {:error, :not_found}
     end
 
-    test "returns error when subject can not enable providers", %{
+    test "returns error when subject cannot enable providers", %{
       subject: subject,
       provider: provider
     } do
@@ -1227,7 +1227,7 @@ defmodule Domain.AuthTest do
       assert delete_provider(provider, subject) == {:error, :not_found}
     end
 
-    test "returns error when subject can not delete providers", %{
+    test "returns error when subject cannot delete providers", %{
       subject: subject,
       provider: provider
     } do
@@ -1423,7 +1423,7 @@ defmodule Domain.AuthTest do
       assert fetch_identity_by_id(identity.id, subject) == {:error, :not_found}
     end
 
-    test "returns error when subject can not view identities", %{
+    test "returns error when subject cannot view identities", %{
       subject: subject
     } do
       subject = Fixtures.Auth.remove_permissions(subject)
@@ -2374,7 +2374,7 @@ defmodule Domain.AuthTest do
       assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
     end
 
-    test "returns error when subject can not delete identities", %{
+    test "returns error when subject cannot delete identities", %{
       identity: identity,
       subject: subject
     } do
@@ -2547,7 +2547,7 @@ defmodule Domain.AuthTest do
       assert delete_identity(identity, subject) == {:error, :not_found}
     end
 
-    test "returns error when subject can not delete identities", %{subject: subject} do
+    test "returns error when subject cannot delete identities", %{subject: subject} do
       identity = Fixtures.Auth.create_identity()
 
       subject = Fixtures.Auth.remove_permissions(subject)

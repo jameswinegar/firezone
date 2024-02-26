@@ -505,7 +505,7 @@ defmodule Domain.PoliciesTest do
       assert disable_policy(policy, subject) == {:error, :not_found}
     end
 
-    test "returns error when subject can not disable policies", %{
+    test "returns error when subject cannot disable policies", %{
       subject: subject,
       policy: policy
     } do
@@ -598,7 +598,7 @@ defmodule Domain.PoliciesTest do
       assert enable_policy(policy, subject) == {:error, :not_found}
     end
 
-    test "returns error when subject can not enable policies", %{
+    test "returns error when subject cannot enable policies", %{
       subject: subject,
       policy: policy
     } do
