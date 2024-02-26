@@ -481,6 +481,11 @@ locals {
     {
       name  = "FEATURE_SIGN_UP_ENABLED"
       value = false
+    },
+    # Sign Up
+    {
+      name  = "SIGN_UP_ALLOWED_DOMAINS"
+      value = "firezone.dev"
     }
   ]
 }
