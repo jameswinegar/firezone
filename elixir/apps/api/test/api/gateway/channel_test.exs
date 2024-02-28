@@ -341,22 +341,15 @@ defmodule API.Gateway.ChannelTest do
                %{
                  type: :turn,
                  expires_at: expires_at_unix,
-                 password: password1,
-                 username: username1,
-                 addr: ^ipv4_turn_uri
-               },
-               %{
-                 type: :turn,
-                 expires_at: expires_at_unix,
-                 password: password2,
-                 username: username2,
-                 addr: ^ipv6_turn_uri
+                 password: password,
+                 username: username,
+                 ipv4_addr: ^ipv4_turn_uri,
+                 ipv6_addr: ^ipv6_turn_uri
                }
              ] = payload.relays
 
-      assert username1 != username2
-      assert password1 != password2
-      assert [username_expires_at_unix, username_salt] = String.split(username1, ":", parts: 2)
+      assert is_binary(password)
+      assert [username_expires_at_unix, username_salt] = String.split(username, ":", parts: 2)
       assert username_expires_at_unix == to_string(DateTime.to_unix(expires_at, :second))
       assert DateTime.from_unix!(expires_at_unix) == DateTime.truncate(expires_at, :second)
       assert is_binary(username_salt)
@@ -451,22 +444,14 @@ defmodule API.Gateway.ChannelTest do
                %{
                  type: :turn,
                  expires_at: expires_at_unix,
-                 password: password1,
-                 username: username1,
-                 addr: ^ipv4_turn_uri
-               },
-               %{
-                 type: :turn,
-                 expires_at: expires_at_unix,
-                 password: password2,
-                 username: username2,
-                 addr: ^ipv6_turn_uri
+                 password: _password,
+                 username: username,
+                 ipv4_addr: ^ipv4_turn_uri,
+                 ipv6_addr: ^ipv6_turn_uri
                }
              ] = payload.relays
 
-      assert username1 != username2
-      assert password1 != password2
-      assert [username_expires_at_unix, username_salt] = String.split(username1, ":", parts: 2)
+      assert [username_expires_at_unix, username_salt] = String.split(username, ":", parts: 2)
       assert username_expires_at_unix == to_string(DateTime.to_unix(expires_at, :second))
       assert DateTime.from_unix!(expires_at_unix) == DateTime.truncate(expires_at, :second)
       assert is_binary(username_salt)
@@ -559,11 +544,8 @@ defmodule API.Gateway.ChannelTest do
       assert [
                %{
                  type: :stun,
-                 addr: ^ipv4_turn_uri
-               },
-               %{
-                 type: :stun,
-                 addr: ^ipv6_turn_uri
+                 ipv4_addr: ^ipv4_turn_uri,
+                 ipv6_addr: ^ipv6_turn_uri
                }
              ] = payload.relays
 
