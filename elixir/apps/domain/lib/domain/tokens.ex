@@ -51,6 +51,13 @@ defmodule Domain.Tokens do
     end
   end
 
+  def list_tokens_by_type(type, %Auth.Subject{} = subject, opts \\ []) do
+    with :ok <- Auth.ensure_has_permissions(subject, Authorizer.manage_tokens_permission()) do
+      Token.Query.by_type(type)
+      |> list_tokens(subject, opts)
+    end
+  end
+
   defp list_tokens(queryable, subject, opts) do
     {preload, _opts} = Keyword.pop(opts, :preload, [])
 

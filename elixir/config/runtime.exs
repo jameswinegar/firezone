@@ -72,7 +72,8 @@ if config_env() == :prod do
     sign_up: compile_config!(:feature_sign_up_enabled),
     flow_activities: compile_config!(:feature_flow_activities_enabled),
     self_hosted_relays: compile_config!(:feature_self_hosted_relays_enabled),
-    multi_site_resources: compile_config!(:feature_multi_site_resources_enabled)
+    multi_site_resources: compile_config!(:feature_multi_site_resources_enabled),
+    api_client_ui: compile_config!(:feature_api_client_ui_enabled)
 
   config :domain, docker_registry: compile_config!(:docker_registry)
 

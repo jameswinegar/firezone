@@ -720,6 +720,7 @@ defmodule Domain.Auth do
          {:ok, subject} <- build_subject(token, context) do
       {:ok, subject}
     else
+      {:error, :actor_not_active} -> {:error, :unauthorized}
       {:error, :invalid_or_expired_token} -> {:error, :unauthorized}
       {:error, :invalid_remote_ip} -> {:error, :unauthorized}
       {:error, :invalid_user_agent} -> {:error, :unauthorized}
@@ -750,7 +751,8 @@ defmodule Domain.Auth do
       when type in [:browser, :client, :api_client] do
     account = Accounts.fetch_account_by_id!(token.account_id)
 
-    with {:ok, actor} <- Actors.fetch_actor_by_id(token.actor_id) do
+    with {:ok, actor} <- Actors.fetch_actor_by_id(token.actor_id),
+         :ok <- ensure_active_actor(actor) do
       permissions = fetch_type_permissions!(actor.type)
 
       %Subject{
@@ -764,6 +766,12 @@ defmodule Domain.Auth do
       }
       |> maybe_fetch_subject_identity(token)
     end
+  end
+
+  defp ensure_active_actor(actor) do
+    if Actors.actor_active?(actor),
+      do: :ok,
+      else: {:error, :actor_not_active}
   end
 
   defp maybe_fetch_subject_identity(%{actor: %{type: :service_account}} = subject, _token) do
