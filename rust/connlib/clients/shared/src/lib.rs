@@ -163,7 +163,7 @@ where
 /// Connects to the portal and starts a tunnel.
 ///
 /// When this function exits, the tunnel failed unrecoverably and you need to call it again.
-pub async fn connect<CB>(
+async fn connect<CB>(
     api_url: Url,
     token: SecretString,
     device_id: String,
