@@ -13,6 +13,7 @@ use std::{
 };
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
+use url::Url;
 
 /// The Apple client implements reconnect logic in the upper layer using OS provided
 /// APIs to detect network connectivity changes. The reconnect timeout here only
@@ -192,7 +193,7 @@ impl WrappedSession {
         let secret = SecretString::from(token);
 
         let session = Session::connect(
-            api_url.as_str(),
+            Url::parse(api_url.as_str()).map_err(|e| e.to_string())?,
             secret,
             device_id,
             device_name_override,

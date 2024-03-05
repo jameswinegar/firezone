@@ -412,7 +412,7 @@ fn connect(
     };
 
     let session = Session::connect(
-        api_url.as_str(),
+        api_url.as_str().try_into().map_err(|_| Error::UriError)?,
         secret,
         device_id,
         Some(device_name),

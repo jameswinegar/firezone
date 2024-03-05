@@ -9,6 +9,7 @@ use connlib_shared::{get_user_agent, login_url, CallbackErrorFacade, Mode, Resul
 use firezone_tunnel::Tunnel;
 use phoenix_channel::PhoenixChannel;
 use secrecy::{Secret, SecretString};
+use std::convert::Infallible;
 use std::time::Duration;
 use url::Url;
 
@@ -53,7 +54,7 @@ where
     /// * `device_id` - The cleartext device ID. connlib will obscure this with a hash internally.
     // TODO: token should be something like SecretString but we need to think about FFI compatibility
     pub fn connect(
-        api_url: impl TryInto<Url>,
+        api_url: Url,
         token: SecretString,
         device_id: String,
         device_name_override: Option<String>,
@@ -61,14 +62,6 @@ where
         callbacks: CB,
         max_partition_time: Option<Duration>,
     ) -> Result<Self> {
-        let (portal_url, private_key) = login_url(
-            Mode::Client,
-            api_url.try_into().map_err(|_| Error::UriError)?,
-            token,
-            device_id,
-            device_name_override,
-        )?;
-
         // TODO: We could use tokio::runtime::current() to get the current runtime
         // which could work with swift-rust that already runs a runtime. But IDK if that will work
         // in all platforms, a couple of new threads shouldn't bother none.
@@ -107,27 +100,15 @@ where
         }
 
         // TODO: Log errors
-        runtime.spawn({
-            let callbacks = callbacks.clone();
-
-            async move {
-                let tunnel = Tunnel::new(private_key, callbacks)?;
-                let portal = PhoenixChannel::connect(
-                    Secret::new(SecureUrl::from_url(portal_url)),
-                    get_user_agent(os_version_override),
-                    PHOENIX_TOPIC,
-                    (),
-                    ExponentialBackoffBuilder::default()
-                        .with_max_elapsed_time(max_partition_time)
-                        .with_max_interval(MAX_RECONNECT_INTERVAL)
-                        .build(),
-                );
-
-                let mut eventloop = Eventloop::new(tunnel, portal);
-
-                std::future::poll_fn(|cx| eventloop.poll(cx)).await
-            }
-        });
+        runtime.spawn(connect(
+            api_url,
+            token,
+            device_id,
+            device_name_override,
+            os_version_override,
+            callbacks.clone(),
+            max_partition_time,
+        ));
 
         std::thread::spawn(move || {
             rx.blocking_recv();
@@ -178,4 +159,41 @@ where
             tracing::error!("Couldn't stop runtime: {err}");
         }
     }
+}
+
+pub async fn connect<CB>(
+    api_url: Url,
+    token: SecretString,
+    device_id: String,
+    device_name_override: Option<String>,
+    os_version_override: Option<String>,
+    callbacks: CB,
+    max_partition_time: Option<Duration>,
+) -> anyhow::Result<Infallible>
+where
+    CB: Callbacks + 'static,
+{
+    let (portal_url, private_key) = login_url(
+        Mode::Client,
+        api_url,
+        token,
+        device_id,
+        device_name_override,
+    )?;
+
+    let tunnel = Tunnel::new(private_key, callbacks)?;
+    let portal = PhoenixChannel::connect(
+        Secret::new(SecureUrl::from_url(portal_url)),
+        get_user_agent(os_version_override),
+        PHOENIX_TOPIC,
+        (),
+        ExponentialBackoffBuilder::default()
+            .with_max_elapsed_time(max_partition_time)
+            .with_max_interval(MAX_RECONNECT_INTERVAL)
+            .build(),
+    );
+
+    let mut eventloop = Eventloop::new(tunnel, portal);
+
+    std::future::poll_fn(|cx| eventloop.poll(cx)).await
 }
