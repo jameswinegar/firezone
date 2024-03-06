@@ -18,7 +18,7 @@ defmodule Web do
   """
 
   def static_paths,
-    do: ~w(assets fonts images .well-known)
+    do: ~w(assets fonts images .well-known site.webmanifest favicon.ico robots.txt)
 
   def router do
     quote do
@@ -55,6 +55,8 @@ defmodule Web do
     quote do
       use Phoenix.LiveView,
         layout: Keyword.get(unquote(opts), :layout, {Web.Layouts, :app})
+
+      import Web.LiveHelpers
 
       unquote(html_helpers())
 
