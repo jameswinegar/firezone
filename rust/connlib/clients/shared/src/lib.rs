@@ -5,11 +5,10 @@ pub use phoenix_channel::SecureUrl;
 pub use tracing_appender::non_blocking::WorkerGuard;
 
 use backoff::ExponentialBackoffBuilder;
-use connlib_shared::{get_user_agent, login_url, CallbackErrorFacade, Mode, Result};
+use connlib_shared::{get_user_agent, login_url, CallbackErrorFacade, Mode};
 use firezone_tunnel::Tunnel;
 use phoenix_channel::PhoenixChannel;
 use secrecy::{Secret, SecretString};
-use std::convert::Infallible;
 use std::time::Duration;
 use url::Url;
 
@@ -61,7 +60,7 @@ where
         os_version_override: Option<String>,
         callbacks: CB,
         max_partition_time: Option<Duration>,
-    ) -> Result<Self> {
+    ) -> connlib_shared::Result<Self> {
         // TODO: We could use tokio::runtime::current() to get the current runtime
         // which could work with swift-rust that already runs a runtime. But IDK if that will work
         // in all platforms, a couple of new threads shouldn't bother none.
@@ -174,46 +173,30 @@ async fn connect<CB>(
 ) where
     CB: Callbacks + 'static,
 {
-    match connect_inner(
-        api_url,
-        token,
-        device_id,
-        device_name_override,
-        os_version_override,
-        callbacks.clone(),
-        max_partition_time,
-    )
-    .await
-    {
-        Ok(never) => match never {},
-        Err(e) => {
-            tracing::error!("Tunnel failed: {e:#}");
-            let _ = callbacks.on_disconnect(None);
-        }
-    }
-}
-
-async fn connect_inner<CB>(
-    api_url: Url,
-    token: SecretString,
-    device_id: String,
-    device_name_override: Option<String>,
-    os_version_override: Option<String>,
-    callbacks: CB,
-    max_partition_time: Option<Duration>,
-) -> anyhow::Result<Infallible>
-where
-    CB: Callbacks + 'static,
-{
-    let (portal_url, private_key) = login_url(
+    let (portal_url, private_key) = match login_url(
         Mode::Client,
         api_url,
         token,
         device_id,
         device_name_override,
-    )?;
+    ) {
+        Ok((portal_url, private_key)) => (portal_url, private_key),
+        Err(e) => {
+            tracing::error!("Failed to build login URL: {e}");
+            let _ = callbacks.on_disconnect(None); // None means don't invalidate the token.
+            return;
+        }
+    };
 
-    let tunnel = Tunnel::new(private_key, callbacks)?;
+    let tunnel = match Tunnel::new(private_key, callbacks.clone()) {
+        Ok(tunnel) => tunnel,
+        Err(e) => {
+            tracing::error!("Failed to make tunnel: {e}");
+            let _ = callbacks.on_disconnect(None); // None means don't invalidate the token.
+            return;
+        }
+    };
+
     let portal = PhoenixChannel::connect(
         Secret::new(SecureUrl::from_url(portal_url)),
         get_user_agent(os_version_override),
@@ -227,5 +210,11 @@ where
 
     let mut eventloop = Eventloop::new(tunnel, portal);
 
-    std::future::poll_fn(|cx| eventloop.poll(cx)).await
+    match std::future::poll_fn(|cx| eventloop.poll(cx)).await {
+        Ok(never) => match never {},
+        Err(e) => {
+            tracing::error!("Eventloop failed: {e}");
+            let _ = callbacks.on_disconnect(todo!("invalidate token in case of auth error"));
+        }
+    }
 }
