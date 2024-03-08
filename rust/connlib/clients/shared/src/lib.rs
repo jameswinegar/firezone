@@ -30,15 +30,11 @@ const MAX_RECONNECT_INTERVAL: Duration = Duration::from_secs(5);
 /// A session is the entry-point for connlib, maintains the runtime and the tunnel.
 ///
 /// A session is created using [Session::connect], then to stop a session we use [Session::disconnect].
-pub struct Session<CB: Callbacks> {
+pub struct Session {
     runtime_stopper: tokio::sync::mpsc::Sender<StopRuntime>,
-    callbacks: CallbackErrorFacade<CB>,
 }
 
-impl<CB> Session<CB>
-where
-    CB: Callbacks + 'static,
-{
+impl Session {
     /// Starts a session in the background.
     ///
     /// This will:
@@ -52,7 +48,7 @@ where
     ///
     /// * `device_id` - The cleartext device ID. connlib will obscure this with a hash internally.
     // TODO: token should be something like SecretString but we need to think about FFI compatibility
-    pub fn connect(
+    pub fn connect<CB: Callbacks + 'static>(
         api_url: Url,
         token: SecretString,
         device_id: String,
@@ -103,7 +99,7 @@ where
             device_id,
             device_name_override,
             os_version_override,
-            callbacks.clone(),
+            callbacks,
             max_partition_time,
         ));
 
@@ -114,11 +110,10 @@ where
 
         Ok(Self {
             runtime_stopper: tx,
-            callbacks,
         })
     }
 
-    fn disconnect_inner(
+    fn disconnect_inner<CB: Callbacks + 'static>(
         runtime_stopper: tokio::sync::mpsc::Sender<StopRuntime>,
         callbacks: &CallbackErrorFacade<CB>,
         error: Option<Error>,
