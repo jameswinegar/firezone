@@ -183,7 +183,7 @@ async fn connect<CB>(
         Ok((portal_url, private_key)) => (portal_url, private_key),
         Err(e) => {
             tracing::error!("Failed to build login URL: {e}");
-            let _ = callbacks.on_disconnect(None); // None means don't invalidate the token.
+            let _ = callbacks.on_disconnect(&e);
             return;
         }
     };
@@ -192,7 +192,7 @@ async fn connect<CB>(
         Ok(tunnel) => tunnel,
         Err(e) => {
             tracing::error!("Failed to make tunnel: {e}");
-            let _ = callbacks.on_disconnect(None); // None means don't invalidate the token.
+            let _ = callbacks.on_disconnect(&e);
             return;
         }
     };
