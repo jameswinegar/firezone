@@ -1,7 +1,7 @@
 //! Placeholder
 
 use super::Error;
-use connlib_shared::control::SecureUrl;
+use connlib_client_shared::SecureUrl;
 use secrecy::Secret;
 
 pub(crate) struct Server {}
