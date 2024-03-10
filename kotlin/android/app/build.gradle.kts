@@ -58,7 +58,7 @@ android {
         // mark:automatic-version
         versionName = "1.0.0"
         multiDexEnabled = true
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "dev.firezone.android.core.HiltTestRunner"
     }
 
     signingConfigs {
@@ -177,6 +177,10 @@ dependencies {
     implementation("com.google.dagger:hilt-android:2.50")
     kapt("androidx.hilt:hilt-compiler:1.2.0")
     kapt("com.google.dagger:hilt-android-compiler:2.50")
+    // Instrumented Tests
+    androidTestImplementation("com.google.dagger:hilt-android-testing:2.50")
+    kaptAndroidTest("com.google.dagger:hilt-android-compiler:2.50")
+    implementation("androidx.test:runner:1.5.2")
 
     // Retrofit 2
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
