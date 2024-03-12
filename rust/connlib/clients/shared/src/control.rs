@@ -427,9 +427,6 @@ impl<CB: Callbacks + 'static> ControlPlane<CB> {
                     }
                 });
             }
-            Ok(firezone_tunnel::Event::SendPacket(_)) => {
-                unimplemented!("Handled internally");
-            }
             Err(e) => {
                 tracing::error!("Tunnel failed: {e:#?}");
             }
