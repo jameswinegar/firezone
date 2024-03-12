@@ -14,7 +14,7 @@ use std::{
     collections::HashSet,
     fmt,
     hash::Hash,
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
     time::{Duration, Instant},
 };
 
@@ -103,8 +103,6 @@ where
             self.io.reset_timeout(timeout);
         }
 
-        ready!(self.io.sockets_ref().poll_send_ready(cx))?; // Ensure socket is ready before continuing
-
         match self.io.poll(cx, self.read_buf.as_mut())? {
             Poll::Ready(io::Input::Timeout(timeout)) => {
                 self.node.handle_timeout(timeout);
@@ -169,6 +167,8 @@ where
 
                     self.io.device_mut().write(packet.as_immutable())?;
                 }
+
+                cx.waker().wake_by_ref();
             }
             Poll::Pending => {}
         }
@@ -213,8 +213,6 @@ where
         if let Some(timeout) = self.node.poll_timeout() {
             self.io.reset_timeout(timeout);
         }
-
-        ready!(self.io.sockets_ref().poll_send_ready(cx))?; // Ensure socket is ready before continuing
 
         match self.io.poll(cx, self.read_buf.as_mut())? {
             Poll::Ready(io::Input::Timeout(timeout)) => {
@@ -279,6 +277,8 @@ where
 
                     self.io.device_mut().write(packet.as_immutable())?;
                 }
+
+                cx.waker().wake_by_ref();
             }
             Poll::Pending => {}
         }
