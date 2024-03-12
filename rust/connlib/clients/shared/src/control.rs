@@ -428,7 +428,7 @@ impl<CB: Callbacks + 'static> ControlPlane<CB> {
                 });
             }
             Err(e) => {
-                tracing::error!("Tunnel failed: {e:#?}");
+                tracing::warn!("Tunnel error: {e}");
             }
         }
     }
