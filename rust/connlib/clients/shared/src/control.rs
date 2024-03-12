@@ -22,7 +22,7 @@ use crate::messages::{
 };
 use connlib_shared::{
     control::{PhoenixSenderWithTopic, Reference},
-    messages::{GatewayId, ResourceDescription, ResourceId},
+    messages::{ResourceDescription, ResourceId},
     Callbacks,
     Error::{self},
     Result,
@@ -371,9 +371,9 @@ impl<CB: Callbacks + 'static> ControlPlane<CB> {
             .await;
     }
 
-    pub async fn handle_tunnel_event(&mut self, event: Result<firezone_tunnel::Event<GatewayId>>) {
+    pub async fn handle_tunnel_event(&mut self, event: Result<firezone_tunnel::ClientEvent>) {
         match event {
-            Ok(firezone_tunnel::Event::SignalIceCandidate { conn_id, candidate }) => {
+            Ok(firezone_tunnel::ClientEvent::SignalIceCandidate { conn_id, candidate }) => {
                 if let Err(e) = self
                     .phoenix_channel
                     .send(EgressMessages::BroadcastIceCandidates(
@@ -387,7 +387,7 @@ impl<CB: Callbacks + 'static> ControlPlane<CB> {
                     tracing::error!("Failed to signal ICE candidate: {e}")
                 }
             }
-            Ok(firezone_tunnel::Event::ConnectionIntent {
+            Ok(firezone_tunnel::ClientEvent::ConnectionIntent {
                 resource,
                 connected_gateway_ids,
             }) => {
@@ -413,7 +413,7 @@ impl<CB: Callbacks + 'static> ControlPlane<CB> {
                     // TODO: Clean up connection in `ClientState` here?
                 }
             }
-            Ok(firezone_tunnel::Event::RefreshResources { connections }) => {
+            Ok(firezone_tunnel::ClientEvent::RefreshResources { connections }) => {
                 let mut control_signaler = self.phoenix_channel.clone();
                 tokio::spawn(async move {
                     for connection in connections {
