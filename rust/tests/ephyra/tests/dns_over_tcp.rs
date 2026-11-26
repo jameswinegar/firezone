@@ -11,8 +11,8 @@
 //! server once and its response reaches the client, well before the query timeout.
 
 use std::collections::BTreeSet;
-use std::ops::ControlFlow;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
+use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
 
 use dns_types::{DomainName, Query, RecordType, ResponseBuilder, ResponseCode};
@@ -59,25 +59,40 @@ fn exchange_with(max_large: usize) -> impl Fn(&mut Source) -> Exchange + Clone {
             6..=7 => g.int(9usize..=max_large.min(100).max(9)),
             _ => g.int(9usize..=max_large.max(9)),
         };
-        Exchange { name: name(g), answers }
+        Exchange {
+            name: name(g),
+            answers,
+        }
     }
 }
 
-fn shrink_exchange(e: &Exchange, visit: &mut dyn FnMut(Exchange) -> ControlFlow<()>) -> ControlFlow<()> {
+fn shrink_exchange(
+    e: &Exchange,
+    visit: &mut dyn FnMut(Exchange) -> ControlFlow<()>,
+) -> ControlFlow<()> {
     for answers in [0, e.answers / 2, e.answers.saturating_sub(1)] {
         if answers < e.answers {
-            visit(Exchange { answers, ..e.clone() })?;
+            visit(Exchange {
+                answers,
+                ..e.clone()
+            })?;
         }
     }
     if e.name != "a.example.com" {
-        visit(Exchange { name: "a.example.com".to_owned(), ..e.clone() })?;
+        visit(Exchange {
+            name: "a.example.com".to_owned(),
+            ..e.clone()
+        })?;
     }
     ControlFlow::Continue(())
 }
 
 fn shrink_round(r: &Round, visit: &mut dyn FnMut(Round) -> ControlFlow<()>) -> ControlFlow<()> {
     if r.reorder {
-        visit(Round { reorder: false, ..r.clone() })?;
+        visit(Round {
+            reorder: false,
+            ..r.clone()
+        })?;
     }
     for i in 0..r.exchanges.len() {
         if r.exchanges.len() > 1 {
@@ -103,7 +118,10 @@ fn round_with(max_per_round: usize, max_large: usize) -> impl Fn(&mut Source) ->
     move |g: &mut Source| {
         let n = g.int(1..=max_per_round);
         let ex = exchange_with(max_large);
-        Round { exchanges: (0..n).map(|_| ex(g)).collect(), reorder: g.bool_with(0.4) }
+        Round {
+            exchanges: (0..n).map(|_| ex(g)).collect(),
+            reorder: g.bool_with(0.4),
+        }
     }
 }
 
@@ -123,7 +141,13 @@ pub fn bounded_rounds() -> impl ephyra::Gen<Value = Vec<Round>> {
 
 fn a_records(name: &DomainName, n: usize) -> Vec<(DomainName, u32, dns_types::OwnedRecordData)> {
     (0..n)
-        .map(|i| (name.clone(), 60, dns_types::records::a(Ipv4Addr::from(0x0A00_0000 + i as u32))))
+        .map(|i| {
+            (
+                name.clone(),
+                60,
+                dns_types::records::a(Ipv4Addr::from(0x0A00_0000 + i as u32)),
+            )
+        })
         .collect()
 }
 
@@ -172,14 +196,22 @@ pub fn run(rounds: &[Round]) -> Outcome {
     let mut server = dns_over_tcp::Server::new(now);
     server.set_listen_addresses::<1>(BTreeSet::from([resolver]));
 
-    let mut outcome = Outcome { answered: 0, failed: Vec::new(), server_received: 0, bytes_to_client: 0 };
+    let mut outcome = Outcome {
+        answered: 0,
+        failed: Vec::new(),
+        server_received: 0,
+        bytes_to_client: 0,
+    };
 
     for (r, round) in rounds.iter().enumerate() {
         let mut outstanding = 0usize;
         for (i, ex) in round.exchanges.iter().enumerate() {
             // Stub resolvers reuse IDs (Windows always sends 1 over TCP), so IDs repeat.
-            let q = Query::new(ex.name.parse().expect("valid name"), RecordType::A).with_id((i % 2) as u16);
-            client.send_query(resolver, q).expect("source interface is set");
+            let q = Query::new(ex.name.parse().expect("valid name"), RecordType::A)
+                .with_id((i % 2) as u16);
+            client
+                .send_query(resolver, q)
+                .expect("source interface is set");
             outstanding += 1;
         }
 
@@ -218,11 +250,15 @@ pub fn run(rounds: &[Round]) -> Outcome {
                     held.reverse();
                 }
                 for q in held.drain(..) {
-                    let records = a_records(&q.message.domain(), answers_for(round, &q.message.domain()));
-                    let response =
-                        ResponseBuilder::for_query(&q.message, ResponseCode::NOERROR).with_records(records).build();
+                    let records =
+                        a_records(&q.message.domain(), answers_for(round, &q.message.domain()));
+                    let response = ResponseBuilder::for_query(&q.message, ResponseCode::NOERROR)
+                        .with_records(records)
+                        .build();
                     if let Err(e) = server.send_message(q.local, q.remote, response) {
-                        outcome.failed.push(format!("round {r}: server failed to send: {e:#}"));
+                        outcome
+                            .failed
+                            .push(format!("round {r}: server failed to send: {e:#}"));
                     }
                 }
             }
@@ -231,8 +267,16 @@ pub fn run(rounds: &[Round]) -> Outcome {
                 outstanding -= 1;
                 match res.result {
                     Ok(resp) => {
-                        assert_eq!(resp.domain(), res.query.domain(), "round {r}: response for another name");
-                        assert_eq!(resp.id(), res.query.id(), "round {r}: response ID not translated back");
+                        assert_eq!(
+                            resp.domain(),
+                            res.query.domain(),
+                            "round {r}: response for another name"
+                        );
+                        assert_eq!(
+                            resp.id(),
+                            res.query.id(),
+                            "round {r}: response ID not translated back"
+                        );
                         assert_eq!(
                             resp.records().count(),
                             answers_for(round, &res.query.domain()),
@@ -245,7 +289,10 @@ pub fn run(rounds: &[Round]) -> Outcome {
             }
 
             if !progressed {
-                let next = [client.poll_timeout(), server.poll_timeout()].into_iter().flatten().min();
+                let next = [client.poll_timeout(), server.poll_timeout()]
+                    .into_iter()
+                    .flatten()
+                    .min();
                 now = match next {
                     Some(t) if t > now => t,
                     _ => now + Duration::from_millis(1),
@@ -292,10 +339,19 @@ fn every_query_over_tcp_is_answered_below_64k(rounds: Vec<Round>) {
 #[test]
 #[ignore = "debugging aid"]
 fn trace_minimal_failure() {
-    let ex = |name: &str, answers| Exchange { name: name.to_owned(), answers };
-    let round = |exchanges| Round { exchanges, reorder: false };
+    let ex = |name: &str, answers| Exchange {
+        name: name.to_owned(),
+        answers,
+    };
+    let round = |exchanges| Round {
+        exchanges,
+        reorder: false,
+    };
     let rounds = vec![
-        round(vec![ex("a.aabab09a09zz0.azzza.0bbbab9a0b.example.com", 550)]),
+        round(vec![ex(
+            "a.aabab09a09zz0.azzza.0bbbab9a0b.example.com",
+            550,
+        )]),
         round(vec![
             ex("z.bb.b00b.example.com", 7),
             ex("b.0.b0b9z9a0bzbb9z9azbbbzbzz99z0.example.com", 3),

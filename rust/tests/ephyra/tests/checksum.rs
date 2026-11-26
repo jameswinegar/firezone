@@ -83,7 +83,9 @@ fn field(g: &mut Source, width: Width) -> u128 {
 fn case(g: &mut Source) -> Case {
     let all_zero = g.bool_with(0.2);
     let len = g.int(8usize..=40);
-    let data = (0..len).map(|_| if all_zero { 0 } else { word(g) }).collect();
+    let data = (0..len)
+        .map(|_| if all_zero { 0 } else { word(g) })
+        .collect();
     let n = g.int(1usize..=6);
     let updates = (0..n)
         .map(|_| {
@@ -91,12 +93,20 @@ fn case(g: &mut Source) -> Case {
             Update {
                 width,
                 offset: g.int(0usize..=64),
-                value: if all_zero && g.bool_with(0.5) { 0 } else { field(g, width) },
+                value: if all_zero && g.bool_with(0.5) {
+                    0
+                } else {
+                    field(g, width)
+                },
             }
         })
         .collect();
 
-    Case { data, udp_style: g.bool(), updates }
+    Case {
+        data,
+        udp_style: g.bool(),
+        updates,
+    }
 }
 
 fn shrink_case(c: &Case, visit: &mut dyn FnMut(Case) -> ControlFlow<()>) -> ControlFlow<()> {
@@ -158,19 +168,31 @@ fn apply(update: ChecksumUpdate, width: Width, old: u128, new: u128) -> Checksum
 fn incremental_update_always_verifies(c: Case) {
     let mut data = c.data.clone();
     let computed = !ones_sum(data.iter().copied());
-    let mut checksum = if c.udp_style && computed == 0 { 0xFFFF } else { computed };
+    let mut checksum = if c.udp_style && computed == 0 {
+        0xFFFF
+    } else {
+        computed
+    };
     assert!(verifies(&data, checksum), "model checksum must verify");
 
     for (step, u) in c.updates.iter().enumerate() {
         let slots = data.len() - u.width.words() + 1;
         let at = u.offset % slots;
-        let mask = if u.width == Width::U128 { u128::MAX } else { (1u128 << (16 * u.width.words())) - 1 };
+        let mask = if u.width == Width::U128 {
+            u128::MAX
+        } else {
+            (1u128 << (16 * u.width.words())) - 1
+        };
         let new = u.value & mask;
         let old = read_field(&data, at, u.width);
         write_field(&mut data, at, u.width, new);
 
         let update = apply(ChecksumUpdate::new(checksum), u.width, old, new);
-        checksum = if c.udp_style { update.into_udp_checksum() } else { update.into_ip_checksum() };
+        checksum = if c.udp_style {
+            update.into_udp_checksum()
+        } else {
+            update.into_ip_checksum()
+        };
 
         assert!(
             verifies(&data, checksum),

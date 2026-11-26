@@ -27,7 +27,13 @@ impl Pair {
         let mut server = dns_over_tcp::Server::new(now);
         server.set_listen_addresses::<1>(BTreeSet::from([resolver]));
 
-        Self { start: now, now, resolver, client, server }
+        Self {
+            start: now,
+            now,
+            resolver,
+            client,
+            server,
+        }
     }
 
     /// Sends one query and drives both sides until the client has a result, answering
@@ -65,8 +71,13 @@ impl Pair {
                 return Some(r.result.map_err(|e| format!("{e:#}")));
             }
             if !progressed {
-                let next = [self.client.poll_timeout(), self.server.poll_timeout()].into_iter().flatten().min();
-                self.now = next.filter(|t| *t > self.now).unwrap_or(self.now + Duration::from_millis(1));
+                let next = [self.client.poll_timeout(), self.server.poll_timeout()]
+                    .into_iter()
+                    .flatten()
+                    .min();
+                self.now = next
+                    .filter(|t| *t > self.now)
+                    .unwrap_or(self.now + Duration::from_millis(1));
             }
         }
 
@@ -75,9 +86,17 @@ impl Pair {
 }
 
 fn a_records(query: &Query, n: usize) -> Response {
-    let records = (0..n).map(|i| (query.domain(), 60, dns_types::records::a(Ipv4Addr::from(0x0A00_0000 + i as u32))));
+    let records = (0..n).map(|i| {
+        (
+            query.domain(),
+            60,
+            dns_types::records::a(Ipv4Addr::from(0x0A00_0000 + i as u32)),
+        )
+    });
 
-    ResponseBuilder::for_query(query, ResponseCode::NOERROR).with_records(records).build()
+    ResponseBuilder::for_query(query, ResponseCode::NOERROR)
+        .with_records(records)
+        .build()
 }
 
 fn name(s: &str) -> DomainName {
@@ -130,12 +149,22 @@ fn largest_tcp_response_is_delivered() {
     // character-string of `k` bytes fills the rest.
     let response_with = |(a_count, k): (u32, usize)| {
         let mut records = (0..a_count)
-            .map(|i| (query.domain(), 60, dns_types::records::a(Ipv4Addr::from(0x0A00_0000 + i))))
+            .map(|i| {
+                (
+                    query.domain(),
+                    60,
+                    dns_types::records::a(Ipv4Addr::from(0x0A00_0000 + i)),
+                )
+            })
             .collect::<Vec<_>>();
-        let txt = std::iter::once(k as u8).chain(std::iter::repeat_n(b'x', k)).collect();
+        let txt = std::iter::once(k as u8)
+            .chain(std::iter::repeat_n(b'x', k))
+            .collect();
         records.push((query.domain(), 60, dns_types::records::txt(txt).unwrap()));
 
-        ResponseBuilder::for_query(&query, ResponseCode::NOERROR).with_records(records).build()
+        ResponseBuilder::for_query(&query, ResponseCode::NOERROR)
+            .with_records(records)
+            .build()
     };
     let encoded_len = |r: &Response| r.clone().into_bytes(u16::MAX).len();
     let response = (2_200..2_300)
@@ -148,5 +177,8 @@ fn largest_tcp_response_is_delivered() {
 
     let result = pair.exchange(query, move |q| response.clone().with_id(q.id()));
 
-    assert!(matches!(result, Some(Ok(_))), "{len}-byte response not delivered: {result:?}");
+    assert!(
+        matches!(result, Some(Ok(_))),
+        "{len}-byte response not delivered: {result:?}"
+    );
 }
