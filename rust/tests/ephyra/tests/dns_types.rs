@@ -362,10 +362,11 @@ fn doh_url(g: &mut Source) -> String {
             name + ".example"
         }
     };
-    let port = g
-        .bool_with(0.3)
-        .then(|| format!(":{}", g.int(1u16..=u16::MAX)))
-        .unwrap_or_default();
+    let port = if g.bool_with(0.3) {
+        format!(":{}", g.int(1u16..=u16::MAX))
+    } else {
+        String::new()
+    };
     let path = *g.pick(&["", "/", "/dns-query", "/a/b%20c", "/resolve/"]);
     format!("https://{host}{port}{path}")
 }

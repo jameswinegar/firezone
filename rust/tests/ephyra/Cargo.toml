@@ -38,6 +38,4 @@ overflow-checks = true
 # Same patches as the main workspace, which path dependencies don't inherit.
 [patch.crates-io]
 ip_network = { git = "https://github.com/JakubOnderka/ip_network", branch = "master" }
-ip_network_table = { git = "https://github.com/edmonds/ip_network_table", branch = "some-useful-traits" }
-quinn-udp = { git = "https://github.com/firezone/quinn", version = "0.6.0", branch = "main" }
 sanstun = { git = "https://github.com/firezone/sanstun", branch = "main" }

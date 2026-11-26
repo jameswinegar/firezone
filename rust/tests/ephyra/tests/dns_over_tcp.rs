@@ -54,15 +54,18 @@ fn name(g: &mut Source) -> String {
 
 fn exchange_with(max_large: usize) -> impl Fn(&mut Source) -> Exchange + Clone {
     move |g: &mut Source| {
+        let name = name(g);
+        // Uncompressed A records take the owner name plus 16 bytes; stay within one
+        // 65,535-byte message so the response is not truncated (TC) by design.
+        let fits = 65_000 / (name.len() + 16);
+        let large = max_large.min(fits).max(9);
         let answers = match g.int(0u8..=9) {
             0..=5 => g.int(0usize..=8),
-            6..=7 => g.int(9usize..=max_large.min(100).max(9)),
-            _ => g.int(9usize..=max_large.max(9)),
+            6..=7 => g.int(9usize..=large.min(100)),
+            8 => large,
+            _ => g.int(9usize..=large),
         };
-        Exchange {
-            name: name(g),
-            answers,
-        }
+        Exchange { name, answers }
     }
 }
 
@@ -277,9 +280,15 @@ pub fn run(rounds: &[Round]) -> Outcome {
                             res.query.id(),
                             "round {r}: response ID not translated back"
                         );
+                        // A response over 65,535 bytes is sent truncated, without records.
+                        let expected = if resp.truncated() {
+                            0
+                        } else {
+                            answers_for(round, &res.query.domain())
+                        };
                         assert_eq!(
                             resp.records().count(),
-                            answers_for(round, &res.query.domain()),
+                            expected,
                             "round {r}: response for another query"
                         );
                         outcome.answered += 1;

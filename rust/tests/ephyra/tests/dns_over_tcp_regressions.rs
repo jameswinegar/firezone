@@ -83,6 +83,58 @@ impl Pair {
 
         None
     }
+
+    /// Sends all `queries` at once (pipelined on the one connection) and drives both
+    /// sides until each has a result or half the query timeout passed.
+    fn exchange_all(
+        &mut self,
+        queries: Vec<Query>,
+        respond: impl Fn(&Query) -> Response,
+    ) -> Vec<Result<Response, String>> {
+        let n = queries.len();
+        for query in queries {
+            self.client.send_query(self.resolver, query).unwrap();
+        }
+        let deadline = self.now + QUERY_TIMEOUT / 2;
+        let mut results = Vec::new();
+
+        while results.len() < n && self.now < deadline {
+            self.client.handle_timeout(self.now);
+            self.server.handle_timeout(self.now);
+
+            let mut progressed = false;
+            while let Some(p) = self.client.poll_outbound() {
+                progressed = true;
+                self.server.handle_inbound(p);
+            }
+            while let Some(p) = self.server.poll_outbound() {
+                progressed = true;
+                self.client.handle_inbound(p);
+            }
+            while let Some(q) = self.server.poll_queries() {
+                progressed = true;
+                let response = respond(&q.message);
+                if let Err(e) = self.server.send_message(q.local, q.remote, response) {
+                    results.push(Err(format!("server failed to send response: {e:#}")));
+                }
+            }
+            while let Some(r) = self.client.poll_query_result() {
+                progressed = true;
+                results.push(r.result.map_err(|e| format!("{e:#}")));
+            }
+            if !progressed {
+                let next = [self.client.poll_timeout(), self.server.poll_timeout()]
+                    .into_iter()
+                    .flatten()
+                    .min();
+                self.now = next
+                    .filter(|t| *t > self.now)
+                    .unwrap_or(self.now + Duration::from_millis(1));
+            }
+        }
+
+        results
+    }
 }
 
 fn a_records(query: &Query, n: usize) -> Response {
@@ -181,4 +233,22 @@ fn largest_tcp_response_is_delivered() {
         matches!(result, Some(Ok(_))),
         "{len}-byte response not delivered: {result:?}"
     );
+}
+
+/// RFC 7766 6.2.1.1: clients may pipeline queries on one connection. Windows' stub
+/// resolver sends all of its TCP queries with ID 1. Three ~46 KB answers do not fit the
+/// send buffer at once; the server resets the connection instead of waiting for room.
+#[test]
+fn pipelined_large_responses_are_all_delivered() {
+    let mut pair = Pair::new();
+    let queries = ["a.example.com", "b.example.com", "c.example.com"]
+        .map(|n| Query::new(name(n), RecordType::A).with_id(1))
+        .to_vec();
+
+    let results = pair.exchange_all(queries, |q| a_records(q, 1_600));
+
+    assert_eq!(results.len(), 3, "{results:?}");
+    for r in &results {
+        assert!(r.is_ok(), "pipelined response not delivered: {results:?}");
+    }
 }

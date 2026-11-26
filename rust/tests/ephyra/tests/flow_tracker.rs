@@ -88,6 +88,7 @@ fn op(g: &mut Source, full: bool) -> Op {
     }
 }
 
+#[expect(clippy::ptr_arg, reason = "A shrinker takes `&T` for `T = Vec<Op>`.")]
 fn shrink_ops(ops: &Vec<Op>, visit: &mut dyn FnMut(Vec<Op>) -> ControlFlow<()>) -> ControlFlow<()> {
     for i in (0..ops.len()).rev() {
         let mut s = ops.clone();
