@@ -1,0 +1,24 @@
+[package]
+name = "ephyra-properties"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Ephyra property tests for connlib's parsers and data structures."
+
+# Standalone on purpose: keeps the property suite and its dependencies out of
+# the main workspace and its lockfile.
+[workspace]
+
+[dev-dependencies]
+deadline-map = { path = "../../libs/connlib/deadline-map" }
+dns-over-tcp = { path = "../../libs/connlib/dns-over-tcp" }
+l3-tcp = { path = "../../libs/connlib/l3-tcp" }
+dns-types = { path = "../../libs/connlib/dns-types" }
+incremental-inet-checksum = { path = "../../libs/incremental-inet-checksum" }
+ip-packet = { path = "../../libs/connlib/ip-packet" }
+ephyra = "0.0.1"
+
+[profile.release]
+debug-assertions = true
+overflow-checks = true
